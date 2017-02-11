@@ -123,11 +123,18 @@ summary(lm(rep_share ~ state_lives_saved_mid, data=state_df))
 
 # Summarize
 
-kable(head(state_df[,c('STNAME',
-                       'state_lives_saved_lower',
-                       'state_lives_saved_mid',
-                       'state_lives_saved_upper',
-                       'rep_margin_change')], n=10))
+state_output_df = state_df[,c('STNAME',
+                              'state_lives_saved_lower',
+                              'state_lives_saved_mid',
+                              'state_lives_saved_upper',
+                              'rep_margin_change')]
+colnames(state_output_df) = c('State name',
+                              'Lives saved/100k (low)',
+                              'Lives saved/100k (mid)',
+                              'Lives saved/100k (upper)',
+                              '2016 red margin shift')
+
+kable(head(state_output_df, n=10), digits=2)
 
 # Map stuff here
 
