@@ -1,16 +1,41 @@
 library(stringr)
 library(ggplot2)
-library(dtplyr)
+library(dplyr)
+library(data.table)
 library(knitr)
+library(rgdal)
+library(scales)
+
+medicaid_non_adopters = c("Alabama",
+                          "Florida",
+                          "Georgia",
+                          "Idaho",
+                          "Kansas",
+                          "Maine",
+                          "Mississippi",
+                          "Missouri",
+                          "Nebraska",
+                          "North Carolina",
+                          "Oklahoma",
+                          "South Carolina",
+                          "South Dakota",
+                          "Tennessee",
+                          "Texas",
+                          "Utah",
+                          "Virginia",
+                          "Wisconsin",
+                          "Wyoming")
 
 twenty_twelve_county_results = read.csv("/Users/g/Desktop/2012_0_0_2.csv") %>%
   select(fips, vote1, vote2, totalvote)
 twenty_sixteen_county_results = read.csv("/Users/g/Desktop/2016_0_0_2.csv") %>%
-  select(fips, vote1, vote2, totalvote)
+  select(fips, vote1, vote2, totalvote) %>%
+  mutate(rep_win_county = ifelse(vote2 > vote1, 1, 0))
 twenty_twelve_state_results = read.csv("/Users/g/Desktop/2012_0_0_1.csv") %>%
   select(name, vote1, vote2, totalvote)
 twenty_sixteen_state_results = read.csv("/Users/g/Desktop/2016_0_0_1.csv") %>%
-  select(name, vote1, vote2, totalvote)
+  select(name, vote1, vote2, totalvote) %>%
+  mutate(rep_win_state = ifelse(vote2 > vote1, 1, 0))
 
 pop_df = read.csv("/Users/g/Desktop/cc-est2015-alldata.csv")
 uninsured_df = read.csv("/Users/g/Desktop/County_Data_2016.csv") %>%
@@ -42,7 +67,8 @@ colnames(county_election_results) = c('fips',
                                       'total2012',
                                       'dem2016',
                                       'rep2016',
-                                      'total2016')
+                                      'total2016',
+                                      'rep_win_county')
 county_election_results = county_election_results %>%
   mutate(rep_margin_change = (rep2016 / total2016 - dem2016 / total2016) - (rep2012 / total2012 - dem2012 / total2012))
 
@@ -72,19 +98,38 @@ agg_df = pop_df %>%
          lives_saved_mid,
          lives_saved_upper) %>%
   arrange(-lives_saved_mid) %>%
-  left_join(county_election_results, by=c("FIPS"="fips"))
+  left_join(county_election_results, by=c("FIPS"="fips")) %>%
+  left_join(twenty_sixteen_state_results[,c("name", "rep_win_state")], by=c("STNAME"="name")) %>%
+  mutate(non_expander = ifelse(STNAME %in% medicaid_non_adopters, 1, 0)) %>%
+  .[complete.cases(.),]
 
-# Find top 10
-
-top_ten = head(agg_df, n=10)
+agg_df$rep_margin_change = agg_df$rep_margin_change * 10
 
 # County correlation
 
-ggplot(agg_df, aes(x=lives_saved_mid, y=rep_margin_change)) +
-  geom_point() +
-  geom_smooth(method="lm", se=FALSE)
+p1 = ggplot(agg_df) +
+  geom_smooth(method="lm",
+              se=F,
+              aes(x=lives_saved_mid, y=rep_margin_change), color="black") +
+  geom_point(aes(x=lives_saved_mid,
+                 y=rep_margin_change,
+                 color=factor(rep_win_county)),
+             position=position_jitter(width=0.5),
+             size=0.5,
+             alpha=0.4) +
+  scale_color_manual(values=c("blue", "red")) +
+  lims(x = c(-50, 50), y=c(-5, 5)) +
+  labs(x="Lives saved per 100k (moderate)",
+       y="Red shift (percentage points) 2012-6") +
+  guides(color = guide_legend(title = "Rep win")) +
+  theme_bw()
+
+ggsave("/Users/g/Desktop/p1.png", p1, device="png", width=8, height=4.5, dpi=800)
 
 summary(lm(rep_margin_change ~ lives_saved_mid, data=agg_df))
+
+summary(lm(rep_margin_change ~ lives_saved_mid + non_expander + lives_saved_mid * non_expander, data=agg_df))
+
 
 # State level
 
@@ -97,7 +142,8 @@ colnames(state_election_results) = c('name',
                                      'total2012',
                                      'dem2016',
                                      'rep2016',
-                                     'total2016')
+                                     'total2016',
+                                     'rep_win_state')
 state_election_results = state_election_results %>%
   mutate(rep_share = rep2016 / total2016,
          rep_margin_change = (rep2016 / total2016 - dem2016 / total2016) - (rep2012 / total2012 - dem2012 / total2012))
@@ -129,16 +175,76 @@ state_output_df = state_df[,c('STNAME',
                               'state_lives_saved_upper',
                               'rep_margin_change')]
 colnames(state_output_df) = c('State name',
-                              'Lives saved/100k (low)',
-                              'Lives saved/100k (mid)',
-                              'Lives saved/100k (upper)',
+                              'Lives saved/100k (conservative)',
+                              'Lives saved/100k (moderate)',
+                              'Lives saved/100k (optimistic)',
                               '2016 red margin shift')
 
 kable(head(state_output_df, n=10), digits=2)
 
+# Full charts
+
+kable(state_output_df, digits=2)
+
+county_output_df = agg_df %>%
+  select(STNAME, CTYNAME, TOT_POP, lives_saved_lower, lives_saved_mid, lives_saved_upper) %>%
+  mutate(abs_lives_saved_lower = lives_saved_lower * TOT_POP / 100000,
+         abs_lives_saved_mid =  lives_saved_mid * TOT_POP / 100000,
+         abs_lives_saved_upper = lives_saved_upper * TOT_POP / 100000) %>%
+  arrange(STNAME, CTYNAME)
+
+# hacky for Dona Ana County, NM
+county_output_df$CTYNAME = as.numeric(county_output_df$CTYNAME)
+county_output_df$CTYNAME[1774] = 'Dona Ana County'
+
+colnames(county_output_df) = c('State name',
+                               'County name',
+                               'County population',
+                               'LS/100k (conservative)',
+                               'LS/100k (moderate)',
+                               'LS/100k (optimistic)',
+                               'LS (conservative)',
+                               'LS (moderate)',
+                               'LS (optimistic)')
+
+
+kable(county_output_df, digits=2)
+
 # Map stuff here
 
-county_map = data.table(map_data('county'))
-setkey(county_map, region, subregion)
+us_counties = map_data("county")
+us_states = map_data("state")
 
-ggplot(county_map, aes(x=long, y=lat, group=group)) + geom_polygon() + coord_map()
+map_df = agg_df %>%
+  select(STNAME, CTYNAME, lives_saved_mid) %>%
+  mutate(STNAME = str_to_lower(STNAME),
+         CTYNAME = str_replace(str_to_lower(CTYNAME), "( county)|( parish)", "")) %>%
+  right_join(us_counties, by=c("STNAME"="region", "CTYNAME"="subregion"))
+
+breaks = c(min(map_df$lives_saved_mid, na.rm=T), 0, max(map_df$lives_saved_mid, na.rm=T))
+
+
+p2 = ggplot() +
+  geom_polygon(data=map_df,
+               aes(x=long, y=lat, group=group, fill=lives_saved_mid)) +
+  geom_path(data=us_states,
+            aes(x=long, y=lat, group=group),
+            size=0.2,
+            color="gray45") +
+  scale_fill_gradientn(colors=c('red', 'white', 'deepskyblue4'),
+                       values=rescale(breaks),
+                       breaks=breaks,
+                       labels=format(breaks)) +
+  guides(fill = guide_colorbar(title = "Lives saved\n")) +
+  theme_bw() +
+  coord_map() +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank())
