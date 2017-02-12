@@ -131,8 +131,6 @@ summary(lm(rep_margin_change ~ lives_saved_mid, data=agg_df))
 summary(lm(rep_margin_change ~ lives_saved_mid + non_expander + lives_saved_mid * non_expander, data=agg_df))
 
 
-# State level
-
 # State election results
 state_election_results = twenty_twelve_state_results %>%
   left_join(twenty_sixteen_state_results, by='name')
