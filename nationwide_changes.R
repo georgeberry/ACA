@@ -192,7 +192,7 @@ county_output_df = agg_df %>%
   arrange(STNAME, CTYNAME)
 
 # hacky for Dona Ana County, NM
-county_output_df$CTYNAME = as.numeric(county_output_df$CTYNAME)
+county_output_df$CTYNAME = as.character(county_output_df$CTYNAME)
 county_output_df$CTYNAME[1774] = 'Dona Ana County'
 
 colnames(county_output_df) = c('State name',
